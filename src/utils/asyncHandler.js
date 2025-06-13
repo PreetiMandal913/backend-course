@@ -1,8 +1,8 @@
 //this is a wrapper function utility in which we accept a function, execute it, and return it in promises
 const asyncHandler = (requestHandler) => {
-    (req, res, next) => {
+    return (req, res, next) => {
         Promise.resolve(requestHandler(req, res, next)).
-        reject((err) => next(err))
+        catch((err) => next(err))
     }
 }
 
