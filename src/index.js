@@ -5,7 +5,7 @@ import { app } from "./app.js";
 
 //configuration for dotenv
 dotenv.config({
-    path: './env'
+    path: './.env'
 })
 
 //if you call an async function... then you have to return a promise
