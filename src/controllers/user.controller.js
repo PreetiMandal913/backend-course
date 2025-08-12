@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js"
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const generateAccessAndRefreshTokens  = async(userId) => {
     try {
@@ -343,6 +344,130 @@ const updateUserCoverImage = asyncHandler(async(req, res) => {
     return res.status(200).json(new ApiResponse(200, user, "Cover Image updated successfully"))
 })
 
+//fuction for getting user subscriber and subscribed count 
+const getUserChannelProfile = asyncHandler(async(req, res) => {
+    const {username} = req.params
+
+    if(!username?.trim()) {
+        throw new ApiError(400, "username is missing")
+    }
+    
+    //using aggregation pipeline
+    const channel = await User.aggregate([
+        {
+            //fetch the data from database where username = username
+            $match: {
+                username: username?.toLowerCase()
+            }
+        },
+        {
+            //this will copy paste whole data instead of id in file
+            //lookup in user database 
+            $lookup: {
+                from: "subscriptions", //Subscription becomes subscriptions in mongodb
+                localField: "_id", //local field is _id in user database
+                foreignField: "channel", //foreign field is channel in subscription database
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribedTo"
+            }
+        },
+        {
+            //this will add extra fields in user database for subscribers count and subscribed count
+            $addFields: {
+                subscribersCount: {
+                    $size: "$subscribers"
+                },
+                channelsSubscribedToCount: {
+                    $size: "$subscribedTo"
+                },
+                isSubscribed: {
+                    $cond: {
+                        if: {$in: [req.user?._id, "$subscribers.subscriber"]},
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        //this will project these fields only
+        {
+            $project: {
+                fullName: 1,
+                username: 1,
+                subscribersCount: 1,
+                channelsSubscribedToCount: 1,
+                isSubscribed: 1,
+                avatar: 1,
+                coverImage: 1,
+                email: 1
+            }
+        }
+    ])
+
+    if(!channel?.length) {
+        throw new ApiError(404, "channel does not exists")
+    }
+
+    return res.status(200).json(new ApiResponse(200, channel[0], "User channel fetched successfully"))
+})
+
+//imp note - when we use 'req.user._id' we get only string which is not actual mongodb id. mongodb id is in the form of ObjectId('ajkjfahejh') something like this
+//which is internally handled by mongoose automatically when we give only string
+//but in pipelining we have to convert this string to object to be handled because aggregation pipeline's code goes directly
+const getWatchHistory = asyncHandler(async(req, res) => {
+    const user = await User.aggregate([
+        {
+            $match: {
+                //so here we change that string to object
+                _id: new mongoose.Types.ObjectId(req.user._id)
+            },
+            $lookup: {
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchHistory",
+                //writing subpipelining
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "owner",
+                            foreignField: "_id",
+                            as: "owner",
+                            //we could have use this pipeline outside but we want to project fields inside owner field
+                            pipeline: [
+                                {
+                                    $project: {
+                                        fullName: 1,
+                                        username: 1,
+                                        avatar: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $addFields: {
+                            owner: {
+                                $first: "$owner"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    ])
+
+    return res.status(200).json(new ApiResponse(200, user[0].watchHistory, "watch history fetched successfully"))
+})
+
 export {
     registerUser,
     loginUser,
@@ -352,5 +477,7 @@ export {
     getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
-    updateUserCoverImage
+    updateUserCoverImage,
+    getUserChannelProfile,
+    getWatchHistory
 }
